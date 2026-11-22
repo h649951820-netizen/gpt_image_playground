@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta name="robots" content="noindex, nofollow">
+<title>生成分享链接</title>
+<style>
+  :root {
+    --bg: #f6f6f4; --card: #ffffff; --text: #1d1d1f; --muted: #6b6b70;
+    --line: #e3e3e0; --accent: #2f6bff; --accent-text: #ffffff; --warn-bg: #fff6e5; --warn-text: #8a5a00;
+    --ok: #1f8a4c;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #161618; --card: #1f1f22; --text: #ececee; --muted: #9a9aa0;
+      --line: #333338; --accent: #5b8cff; --accent-text: #ffffff; --warn-bg: #33270f; --warn-text: #f0c46b;
+      --ok: #4cc283;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.6 -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; }
+  main { max-width: 640px; margin: 0 auto; padding: 32px 16px 48px; }
+  h1 { font-size: 22px; margin: 0 0 6px; }
+  p.lead { color: var(--muted); margin: 0 0 20px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 20px; margin-bottom: 16px; }
+  label { display: block; font-weight: 600; margin: 14px 0 6px; }
+  label:first-child { margin-top: 0; }
+  .hint { font-weight: 400; color: var(--muted); font-size: 13px; }
+  input, textarea { width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px;
+    background: transparent; color: var(--text); font: inherit; }
+  input:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-color: transparent; }
+  textarea { min-height: 120px; resize: vertical; font-size: 13px; word-break: break-all; }
+  button { appearance: none; border: 0; border-radius: 10px; padding: 10px 18px; font: inherit; font-weight: 600;
+    background: var(--accent); color: var(--accent-text); cursor: pointer; }
+  button.secondary { background: transparent; color: var(--accent); border: 1px solid var(--line); }
+  button:disabled { opacity: .5; cursor: default; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px; align-items: center; }
+  .status { font-size: 13px; color: var(--muted); }
+  .status.ok { color: var(--ok); }
+  .warn { background: var(--warn-bg); color: var(--warn-text); border-radius: 10px; padding: 12px 14px; font-size: 13px; }
+  .warn ul { margin: 6px 0 0; padding-left: 18px; }
+  #result[hidden] { display: none; }
+</style>
+</head>
+<body>
+<main>
+  <h1>生成分享链接</h1>
+  <p class="lead">贴上要给对方的 key，生成一条专属链接。对方打开链接、点「导入」，key 就自动填好，可以直接改图。</p>
+
+  <div class="card">
+    <label for="name">对方名字 <span class="hint">（可选，只用来写好发给对方的话）</span></label>
+    <input id="name" autocomplete="off" placeholder="比如：小王">
+
+    <label for="imgKey">图片 key（MikotoPro） <span class="hint">（建议每人单独建一个，设好额度上限）</span></label>
+    <input id="imgKey" type="password" autocomplete="off" spellcheck="false" placeholder="sk-...">
+
+    <label for="txtKey">对话 key（DeepSeek） <span class="hint">（可选，不填就只填图片 key，对方可以自己补）</span></label>
+    <input id="txtKey" type="password" autocomplete="off" spellcheck="false" placeholder="sk-...">
+
+    <div class="row">
+      <button id="gen" disabled>生成链接</button>
+      <span id="loadStatus" class="status">正在读取配置…</span>
+    </div>
+  </div>
+
+  <div class="card" id="result" hidden>
+    <label for="message">发给对方的话 <span class="hint">（链接里带着 key，只发给这一个人）</span></label>
+    <textarea id="message" readonly></textarea>
+    <div class="row">
+      <button id="copyMsg">复制整段话</button>
+      <button id="copyLink" class="secondary">只复制链接</button>
+      <button id="clear" class="secondary">清空</button>
+      <span id="copyStatus" class="status"></span>
+    </div>
+  </div>
+
+  <div class="warn">
+    这个页面不联网，key 只在你这台电脑的浏览器里拼成链接，不会发到任何地方。
+    <ul>
+      <li>链接里带着 key：拿到链接的人都能用这个 key，别发到群里。</li>
+      <li>对方导入后，key 存在他自己的浏览器里；以后停用，到 MikotoPro 后台禁用这个 key 就行。</li>
+    </ul>
+  </div>
+</main>
+<script>
+(function () {
+  var base = new URL('./', location.href).href;
+  var config = null;
+  var link = '';
+  var $ = function (id) { return document.getElementById(id); };
+
+  fetch('./share-config.json', { cache: 'no-store' })
+    .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+    .then(function (json) {
+      config = json;
+      $('gen').disabled = false;
+      $('loadStatus').textContent = '';
+    })
+    .catch(function (e) {
+      $('loadStatus').textContent = '读取配置失败：' + e.message + '。刷新页面再试。';
+    });
+
+  function findProfile(id) {
+    return (config.profiles || []).filter(function (p) { return p.id === id; })[0];
+  }
+
+  $('gen').addEventListener('click', function () {
+    var imgKey = $('imgKey').value.trim();
+    var txtKey = $('txtKey').value.trim();
+    if (!imgKey) { $('loadStatus').textContent = '图片 key 必须填。'; return; }
+    var profiles = [];
+    var img = findProfile('mikoto-image');
+    var txt = findProfile('deepseek-text');
+    if (img) profiles.push(Object.assign({}, img, { apiKey: imgKey }));
+    if (txtKey && txt) profiles.push(Object.assign({}, txt, { apiKey: txtKey }));
+    profiles.forEach(function (p) { delete p.isDefault; });
+    link = base + '?settings=' + encodeURIComponent(JSON.stringify({ profiles: profiles }));
+    var who = $('name').value.trim();
+    var lines = [
+      (who ? who + '，' : '') + '这是改图工作台的专属链接（里面带着你的 key，别转发给别人）：',
+      link,
+      '',
+      '用法：用电脑上的 Chrome / Edge 打开链接，弹出「导入配置」时点「导入」就能用。',
+      '「画廊」是普通改图：上传图、写一句指令。「Agent」是对话改图：可以连着说、改回上一版。',
+      '图和记录只存在你自己的浏览器里，重要的图记得下载。'
+    ];
+    if (!txtKey) lines.push('对话模式要用 DeepSeek 的 key：右上角齿轮「设置」→「API 配置」切到“文字 DeepSeek”，贴上 key 后点一下空白处。');
+    $('message').value = lines.join('\n');
+    $('result').hidden = false;
+    $('loadStatus').textContent = '';
+    $('copyStatus').textContent = '';
+  });
+
+  function copy(text) {
+    var done = function () { $('copyStatus').textContent = '已复制'; $('copyStatus').className = 'status ok'; };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done, function () { fallback(text); done(); });
+    } else { fallback(text); done(); }
+  }
+  function fallback(text) {
+    var t = document.createElement('textarea');
+    t.value = text; document.body.appendChild(t); t.select();
+    try { document.execCommand('copy'); } catch (e) {}
+    document.body.removeChild(t);
+  }
+  $('copyMsg').addEventListener('click', function () { copy($('message').value); });
+  $('copyLink').addEventListener('click', function () { copy(link); });
+  $('clear').addEventListener('click', function () {
+    ['name', 'imgKey', 'txtKey', 'message'].forEach(function (id) { $(id).value = ''; });
+    link = ''; $('result').hidden = true; $('copyStatus').textContent = '';
+  });
+})();
+</script>
+</body>
+</html>
