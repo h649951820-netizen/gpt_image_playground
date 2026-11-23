@@ -24,6 +24,8 @@ import { CommentBadge } from './CommentMarks'
 import MarkupOverlay from './input/markupOverlay'
 import ImageSearchSources from './ImageSearchSources'
 
+const SQUARE_DOWNLOAD_SIZE = 800
+
 export default function DetailModal() {
   const tasks = useStore((s) => s.tasks)
   const detailTaskId = useStore((s) => s.detailTaskId)
@@ -235,6 +237,8 @@ export default function DetailModal() {
   const outputLen = outputSlots.length
   const currentImageRatio = currentOutputImageId ? imageRatios[currentOutputImageId] : ''
   const currentImageSize = currentOutputImageId ? imageSizes[currentOutputImageId] : ''
+  const squareSize = currentImageSize?.match(/^(\d+)×\1$/)?.[1]
+  const canDownloadSquare = Number(squareSize) >= SQUARE_DOWNLOAD_SIZE
   const baseActualParams = currentOutputImageId
     ? task.actualParamsByImage?.[currentOutputImageId] ?? task.actualParams
     : task.actualParams
@@ -355,12 +359,13 @@ export default function DetailModal() {
     }
   }
 
-  const handleDownloadCurrentOutput = async (e: React.MouseEvent) => {
+  const handleDownloadCurrentOutput = async (e: React.MouseEvent, size?: number) => {
     e.stopPropagation()
     if (!currentOutputImageId || !task) return
 
     try {
-      const result = await downloadImageIds([currentOutputImageId], `task-${task.id}`)
+      const fileName = size ? `task-${task.id}-${size}x${size}` : `task-${task.id}`
+      const result = await downloadImageIds([currentOutputImageId], fileName, undefined, size)
       if (result.canceled) return
       if (result.successCount === 0) {
         showToast(getDownloadErrorMessage(result.error), 'error')
@@ -593,6 +598,16 @@ export default function DetailModal() {
                     {imageIndex + 1} / {outputLen}
                   </span>
                 </>
+              )}
+              {canDownloadSquare && (
+                <button
+                  type="button"
+                  onClick={(e) => void handleDownloadCurrentOutput(e, SQUARE_DOWNLOAD_SIZE)}
+                  className="absolute bottom-4 left-4 z-20 flex items-center gap-1 rounded bg-black/50 px-2 py-0.5 text-xs text-white backdrop-blur-sm transition hover:bg-black/70 focus:outline-none focus:ring-1 focus:ring-white/50"
+                >
+                  <DownloadIcon className="h-4 w-4" />
+                  下载 {SQUARE_DOWNLOAD_SIZE}×{SQUARE_DOWNLOAD_SIZE}
+                </button>
               )}
               {currentOriginalOutputImageId && (
                 <div className="absolute bottom-4 right-4 z-20 flex">

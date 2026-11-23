@@ -1,5 +1,6 @@
 import { zipSync } from 'fflate'
 import type { TaskRecord } from '../types'
+import { canvasToBlob } from './canvasImage'
 import { trackDataTransfer } from './dataOperations'
 import { getNumberedFileNameBase, sanitizeFileNamePart } from './exportFileName'
 import { ensureImageCached } from './imageCache'
@@ -45,7 +46,7 @@ export function getDownloadErrorMessage(err: unknown) {
 }
 
 /** dir 为客户端中已选好的保存目录；未传入时，客户端下载多张会先弹出一次目录选择框，单张弹出保存对话框（“默认地址”模式下都直接写入默认保存地址） */
-export async function downloadImageIds(imageIds: string[], fileNameBase = 'images', dir?: SaveDir | null): Promise<DownloadImagesResult> {
+export async function downloadImageIds(imageIds: string[], fileNameBase = 'images', dir?: SaveDir | null, squareSize?: number): Promise<DownloadImagesResult> {
   if (imageIds.length === 0) return { successCount: 0, failCount: 0 }
 
   let successCount = 0
@@ -60,7 +61,8 @@ export async function downloadImageIds(imageIds: string[], fileNameBase = 'image
   return trackDataTransfer(async () => {
     for (let index = 0; index < imageIds.length; index++) {
       try {
-        const blob = await getImageBlob(imageIds[index])
+        const original = await getImageBlob(imageIds[index])
+        const blob = squareSize ? await resizeSquareImage(original, squareSize) : original
         const order = String(index + 1).padStart(2, '0')
         const fileName = multiple
           ? `${fileNameBase}-${order}.${getBlobExtension(blob)}`
@@ -158,6 +160,23 @@ async function getImageBlob(imageIdOrUrl: string): Promise<Blob> {
   const res = await apiFetch(src)
   if (!res.ok && !src.startsWith('data:')) throw new Error(`读取图片失败：${imageIdOrUrl}`)
   return await res.blob()
+}
+
+async function resizeSquareImage(blob: Blob, size: number): Promise<Blob> {
+  const image = await createImageBitmap(blob)
+  try {
+    if (image.width !== image.height || image.width < size) throw '请选择尺寸足够的方图'
+    const canvas = document.createElement('canvas')
+    canvas.width = size
+    canvas.height = size
+    const ctx = canvas.getContext('2d')
+    if (!ctx) throw new Error('当前浏览器不支持 Canvas')
+    ctx.imageSmoothingQuality = 'high'
+    ctx.drawImage(image, 0, 0, size, size)
+    return await canvasToBlob(canvas)
+  } finally {
+    image.close()
+  }
 }
 
 function getBlobExtension(blob: Blob): string {
